@@ -1,0 +1,123 @@
+<style>
+	body, html, canvas {
+		padding: 0 !important;
+		margin: 0 !important;
+	}
+</style>
+<canvas id="app"></canvas>
+<script>
+	const canvas = document.getElementById('app');
+
+	class Complex {
+		constructor(a, b) {
+			this.a = a;
+			this.b = b;
+		}
+		times(x) {
+			if (typeof x == 'number') return new Complex(this.a*x, this.b*x);
+			return new Complex(this.a*x.a-this.b*x.b, this.a*x.b + this.b*x.a);
+		}
+		plus(x) {
+			if (typeof x == 'number') return new Complex(this.a+x, this.b);
+			return new Complex(this.a+x.a, this.b+x.b);
+		}
+
+		neg() {
+			return new Complex(-this.a, -this.b);
+		}
+
+		static exp(x) {
+			return (new Complex(Math.exp(x.a), 0)).times(new Complex(Math.cos(x.b), Math.sin(x.b)));
+		}
+	}
+
+	const scale = 200;
+	class Arm {
+		constructor(segments, position) {
+			this.segments = segments;
+			this.angles = Array(segments.length).fill(0);
+			this.position = position;
+			this.positions = Array(segments.length).map(() => new Complex(0, 0));
+			this.lr = 1e-2;
+		}
+
+		forward() {
+			let pos = new Complex(this.position.x, this.position.y), direction = new Complex(0, 1);
+			this.positions = [pos];
+			
+			for (let i = 0; i < this.segments.length; i++) {
+				direction = direction.times(Complex.exp(new Complex(0, this.angles[i])));
+				pos = pos.plus(direction.times(this.segments[i]));
+				this.positions.push(pos);
+			}
+		}
+		
+		backward(target) {
+			const grad = [];
+			for (let i = 1; i < this.positions.length; i++) {
+				const after = this.positions[this.positions.length-1].plus(this.positions[i-1].neg());
+				const before = this.positions[i-1].plus(new Complex(-target.x, -target.y));
+				// minimize |z|^2 = |after*e^ai + before|^2
+				// dz/da = i*after*e^ai
+				let z = /*Complex.exp(new Complex(0, this.angles[i-1])).times*/(after);
+				let dzda = z.times(new Complex(0, 1));
+				z = z.plus(before);
+				// |z|^2 = z_r^2 + z_i^2
+				// d|z|^2/da = 2z_r * dz_r/da + 2z_i * dz_i/da
+				grad.push(2*z.a * dzda.a + 2*z.b * dzda.b);
+			}
+			return grad;
+		}
+
+		update(lr, gradient) {
+			for (let i = 0; i < gradient.length; i++) {
+				if (isNaN(gradient[i])) continue;
+				this.angles[i] -= gradient[i]*lr;
+			}
+		}
+
+		learn(target) {
+			this.forward();
+			const gradients = this.backward(target);
+			this.update(this.lr, gradients);
+		}
+
+		draw(ctx) {
+			ctx.beginPath();
+			ctx.moveTo(this.position.x*scale, this.position.y*scale);
+			for (const p of this.positions.slice(1)) ctx.lineTo(p.a*scale, p.b*scale);
+			ctx.stroke();
+			ctx.closePath();
+			ctx.fillStyle = 'black';
+			ctx.font = '14px serif';
+			ctx.fillText('Angles: ' + this.angles.map(x=>x.toFixed(4)).join(' '), 50, 50);
+		}
+	}
+
+	window.onresize = () => {
+		canvas.width = window.innerWidth;
+		canvas.height = window.innerHeight;
+	}
+	window.onload = () => {
+		window.onresize();
+	}
+	window.onmousemove = (e) => {
+		window.mouseX = e.clientX;
+		window.mouseY = e.clientY;
+	}
+	const arm = new Arm([100/scale, 50/scale, 25/scale, 12.5/scale, 6.25/scale], {x: 0/scale, y: 0/scale});
+	const ctx = canvas.getContext('2d');
+	function draw() {
+		ctx.fillStyle = 'white';
+		ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+		for (let i = 0; i < 1000; i++) arm.learn({x: window.mouseX/scale, y: window.mouseY/scale});
+		arm.draw(ctx);
+		arm.position = {x: window.innerWidth/2/scale, y: window.innerHeight/2/scale};
+	}
+
+	function loop() {
+		draw();
+		window.requestAnimationFrame(loop);
+	}
+	loop();
+</script>
